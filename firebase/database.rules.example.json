@@ -1,0 +1,28 @@
+{
+  "rules": {
+    "devices": {
+      "$deviceId": {
+        "live": {
+          ".read": "auth != null",
+          ".write": false
+        },
+        "telemetry": {
+          ".read": "auth != null",
+          ".write": false
+        },
+        "alerts": {
+          ".read": "auth != null",
+          ".write": false
+        },
+        "commands": {
+          ".read": "auth != null",
+          ".write": false
+        },
+        "state": {
+          ".read": "auth != null",
+          ".write": false
+        }
+      }
+    }
+  }
+}

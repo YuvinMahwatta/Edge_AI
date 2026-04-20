@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+secrets/serviceAccountKey.json
+__pycache__/
+.venv/
