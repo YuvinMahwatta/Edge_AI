@@ -1,0 +1,5 @@
+.env
+secrets/serviceAccountKey.json
+__pycache__/
+.venv/
+.vscode/
