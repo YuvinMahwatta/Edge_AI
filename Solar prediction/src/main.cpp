@@ -38,9 +38,9 @@ const float VOLTAGE_DIVIDER_RATIO = 5.0f;
 
 // ===================== THRESHOLDS (tuned for 6V 1W panel) =====================
 const float LOW_VOLTAGE_V        = 1.0f;    // panel barely producing
-const float LOW_CURRENT_A        = 0.003f;  // 3mA minimum (1W panel max ~167mA)
-const float LOW_POWER_W          = 0.005f;  // 5mW minimum
-const float CHARGING_CURRENT_A   = 0.002f;  // 2mA = consider charging
+const float LOW_CURRENT_A        = 0.004f;  // 3mA minimum (1W panel max ~167mA)
+const float LOW_POWER_W          = 0.006f;  // 5mW minimum
+const float CHARGING_CURRENT_A   = 0.003f;  // 2mA = consider charging
 
 // ===================== TIMERS =====================
 unsigned long lastPrintTime = 0;
