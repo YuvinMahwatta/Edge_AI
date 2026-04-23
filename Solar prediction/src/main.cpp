@@ -3,24 +3,29 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_INA219.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <math.h>
 #include <string.h>
-#include "esp32_digital_model_export.h"
+#include "model.h"
 
 // ===================== WIFI / BACKEND CONFIG =====================
-const char* WIFI_SSID = "STARLINK";
-const char* WIFI_PASSWORD = "Alpha@200310013510";
+const char* WIFI_SSID = "SLT_FIBRE";
+const char* WIFI_PASSWORD = "saman123";
 
 // Use your laptop/server LAN IP, not localhost.
-const char* BACKEND_BASE_URL = "http://192.168.8.100:8000";
+const char* BACKEND_BASE_URL = "http://192.168.1.21:8000";
 const char* ESP32_API_KEY = "sunsense-esp32-dev-secret-2026";
 const char* DEVICE_ID = "device-001";
 
 // ===================== PIN DEFINITIONS =====================
 #define INA219_SDA_PIN        21
 #define INA219_SCL_PIN        22
+
+#define OLED_SDA_PIN          18
+#define OLED_SCL_PIN          19
 
 #define VOLTAGE_SENSOR_PIN    32
 #define LDR1_PIN              25    // Digital LDR module 1 (DO pin)
@@ -38,9 +43,9 @@ const float VOLTAGE_DIVIDER_RATIO = 5.0f;
 
 // ===================== THRESHOLDS (tuned for 6V 1W panel) =====================
 const float LOW_VOLTAGE_V        = 1.0f;    // panel barely producing
-const float LOW_CURRENT_A        = 0.004f;  // 3mA minimum (1W panel max ~167mA)
-const float LOW_POWER_W          = 0.006f;  // 5mW minimum
-const float CHARGING_CURRENT_A   = 0.003f;  // 2mA = consider charging
+const float LOW_CURRENT_A        = 0.003f;  // 3mA minimum (1W panel max ~167mA)
+const float LOW_POWER_W          = 0.005f;  // 5mW minimum
+const float CHARGING_CURRENT_A   = 0.002f;  // 2mA = consider charging
 
 // ===================== TIMERS =====================
 unsigned long lastPrintTime = 0;
@@ -55,6 +60,11 @@ const unsigned long wifiRetryInterval = 10000;
 Adafruit_INA219 ina219;
 OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature tempSensor(&oneWire);
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+TwoWire I2COLED = TwoWire(1); // Use second I2C bus
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2COLED, -1);
 
 // ===================== STATE =====================
 bool monitoringEnabled = true;
@@ -89,6 +99,7 @@ void print60SecondReport(const SensorData& d);
 void ensureWifiConnected();
 bool postTelemetry(const SensorData& d);
 const char* mapModelLabelToBackendCondition(const char* mlClassName);
+void updateOLED(const SensorData& d);
 
 // ===================== READ VOLTAGE SENSOR =====================
 float readVoltageSensor() {
@@ -173,7 +184,8 @@ SensorData readAllSensors() {
   d.fault = false;
   d.status = "NORMAL";
 
-  // Light-based decision
+  // --- Rule-based decision (Commented out to rely solely on ML) ---
+  /*
   if (d.lightCount == 0) {
     d.status = "LOW_LIGHT";
   }
@@ -201,21 +213,35 @@ SensorData readAllSensors() {
       d.status = "CHARGING";
     }
   }
+  */
 
   // --- ML Model Inference ---
-  float features[8];
-  features[0] = d.temperatureC;                          // temperature_c
-  features[1] = d.panelVoltageV;                         // voltage_v
-  features[2] = d.currentA;                              // current_a
-  features[3] = d.powerW;                                // power_w
-  features[4] = d.ldr1Light ? 1.0f : 0.0f;               // ldr1_state
-  features[5] = d.ldr2Light ? 1.0f : 0.0f;               // ldr2_state
-  features[6] = (float)d.lightCount;                     // light_count
-  features[7] = (float)d.lightMismatch;                  // light_mismatch
+  int ldr_left = d.ldr1Light ? 1 : 0;
+  int ldr_right = d.ldr2Light ? 1 : 0;
+  float avg_light = (ldr_left + ldr_right) / 2.0f;
+  float light_diff = fabs(ldr_left - ldr_right);
+  float current_ratio = d.currentA / (d.panelVoltageV + 0.00001f);
+  float power_efficiency = d.powerW / (avg_light + 0.1f);
 
-  d.mlPrediction = predict_digital_model(features);
-  d.mlClassName = digital_class_name(d.mlPrediction);
+  float features[10]; 
+  features[0] = d.temperatureC;          // temperature_c
+  features[1] = ldr_left;                // ldr_left
+  features[2] = ldr_right;               // ldr_right
+  features[3] = avg_light;               // avg_light
+  features[4] = light_diff;              // light_diff
+  features[5] = d.panelVoltageV;         // voltage_v
+  features[6] = d.currentA;              // current_a
+  features[7] = d.powerW;                // power_w
+  features[8] = current_ratio;           // current_ratio
+  features[9] = power_efficiency;        // power_efficiency
+
+  d.mlPrediction = predict_model(features);
+  d.mlClassName = class_name(d.mlPrediction);
   d.backendCondition = String(mapModelLabelToBackendCondition(d.mlClassName));
+
+  // Sync core system state to ML prediction
+  d.status = String(d.mlClassName);
+  d.fault = (d.status == "PANEL_FAULT" || d.status == "OVERHEAT");
 
   return d;
 }
@@ -269,48 +295,87 @@ bool postTelemetry(const SensorData& d) {
 
 // ===================== OUTPUT =====================
 void updateIndicators(const SensorData& d) {
-  static unsigned long lastBlink = 0;
-  static bool blinkState = false;
   unsigned long now = millis();
 
-  if (now - lastBlink >= 500) {
-    lastBlink = now;
-    blinkState = !blinkState;
-  }
-
   if (!monitoringEnabled) {
-    digitalWrite(GREEN_LED_PIN, HIGH);
-    digitalWrite(RED_LED_PIN, HIGH);
+    digitalWrite(GREEN_LED_PIN, LOW);
+    digitalWrite(RED_LED_PIN, LOW);
     noTone(BUZZER_PIN);
     return;
   }
 
-  if (d.status == "LOW_LIGHT") {
-    static unsigned long lastBeep = 0;
-    digitalWrite(GREEN_LED_PIN, HIGH);
-    digitalWrite(RED_LED_PIN, blinkState ? LOW : HIGH);
-
-    if (now - lastBeep >= 5000) {
-      lastBeep = now;
-      tone(BUZZER_PIN, 1000);
-    } else if (now - lastBeep >= 200) {
-      noTone(BUZZER_PIN);
-    }
-  }
-  else if (d.fault || d.backendCondition == "Panel Fault" || d.backendCondition == "Overheat") {
-    digitalWrite(GREEN_LED_PIN, HIGH);
-    digitalWrite(RED_LED_PIN, blinkState ? LOW : HIGH);
-
-    if (blinkState) {
+  // --- Buzzer Logic ---
+  // ONLY beep for PANEL_FAULT
+  if (d.status == "PANEL_FAULT") {
+    if ((now / 250) % 2 == 0) { // Fast beep
       tone(BUZZER_PIN, 1500);
     } else {
       noTone(BUZZER_PIN);
     }
   } else {
-    digitalWrite(RED_LED_PIN, HIGH);
     noTone(BUZZER_PIN);
-    digitalWrite(GREEN_LED_PIN, blinkState ? LOW : HIGH);
   }
+
+  // --- LED Logic ---
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
+
+  if (d.status == "NORMAL") {
+    // Normal: Green slow blink (1 Hz)
+    digitalWrite(GREEN_LED_PIN, ((now / 500) % 2 == 0) ? HIGH : LOW);
+  } 
+  else if (d.status == "LOW_LIGHT") {
+    // Low Light: Red slow blink
+    digitalWrite(RED_LED_PIN, ((now / 1000) % 2 == 0) ? HIGH : LOW);
+  }
+  else if (d.status == "SHADOW") {
+    // Shadow: Red double blink pattern
+    int cycle = (now / 200) % 10; // 2 second cycle
+    digitalWrite(RED_LED_PIN, (cycle == 0 || cycle == 2) ? HIGH : LOW);
+  }
+  else if (d.status == "OVERHEAT") {
+    // Overheat: Red fast blink (2.5 Hz)
+    digitalWrite(RED_LED_PIN, ((now / 200) % 2 == 0) ? HIGH : LOW);
+  }
+  else if (d.status == "PANEL_FAULT") {
+    // Panel Fault: Red very fast alternating with buzzer
+    digitalWrite(RED_LED_PIN, ((now / 250) % 2 == 0) ? LOW : HIGH);
+  }
+}
+
+// ===================== OLED DISPLAY =====================
+void updateOLED(const SensorData& d) {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  // Row 1: Voltage & Current
+  display.setCursor(0, 0);
+  display.printf("V:%.1fV  I:%.0fmA", d.panelVoltageV, d.currentA * 1000);
+
+  // Row 2: Power & Temperature
+  display.setCursor(0, 10);
+  display.printf("P:%.1fmW T:%.1fC", d.powerW * 1000, d.temperatureC);
+
+  // Row 3: LDR status
+  display.setCursor(0, 20);
+  display.printf("L1:%s L2:%s",
+    d.ldr1Light ? "ON" : "--",
+    d.ldr2Light ? "ON" : "--");
+
+  // Divider line
+  display.drawLine(0, 29, 127, 29, SSD1306_WHITE);
+
+  // Row 4: ML Prediction
+  display.setCursor(0, 35);
+  display.print("ML:");
+  display.print(d.backendCondition);
+
+  // Row 6: WiFi status
+  display.setCursor(0, 55);
+  display.printf("WiFi:%s", WiFi.status() == WL_CONNECTED ? "OK" : "NO");
+
+  display.display();
 }
 
 void checkSystemErrors(const SensorData& d) {
@@ -321,7 +386,6 @@ void checkSystemErrors(const SensorData& d) {
                 d.ldr1Light ? "LIGHT" : "DARK",
                 d.ldr2Light ? "LIGHT" : "DARK",
                 d.tempValid ? String(d.temperatureC, 1).c_str() : "LAST_VALID_USED");
-  Serial.printf("Rule Status: %s\n", d.status.c_str());
   Serial.printf("ML Prediction: %s | Backend Condition: %s\n",
                 d.mlClassName, d.backendCondition.c_str());
 }
@@ -337,7 +401,6 @@ void print60SecondReport(const SensorData& d) {
   Serial.printf("LDR2        : %s\n", d.ldr2Light ? "LIGHT" : "DARK");
   Serial.printf("Light Count : %d\n", d.lightCount);
   Serial.printf("Mismatch    : %d\n", d.lightMismatch);
-  Serial.printf("Status      : %s\n", d.status.c_str());
   if (d.tempValid) {
     Serial.printf("Temperature : %.1f C\n", d.temperatureC);
   } else {
@@ -362,13 +425,35 @@ void setup() {
   pinMode(LDR2_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
 
-  // Active LOW OFF state
-  digitalWrite(GREEN_LED_PIN, HIGH);
-  digitalWrite(RED_LED_PIN, HIGH);
+  // Active HIGH OFF state
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
   noTone(BUZZER_PIN);
 
   analogReadResolution(12);
+  
   Wire.begin(INA219_SDA_PIN, INA219_SCL_PIN);
+  I2COLED.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+
+  // Initialize OLED display
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("WARNING: SSD1306 OLED not found!");
+  } else {
+    Serial.println("OLED display detected!");
+    
+    // Set to maximum brightness
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(255);
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(10, 20);
+    display.println("SunSenseAI");
+    display.setCursor(10, 35);
+    display.println("Starting...");
+    display.display();
+  }
 
   if (!ina219.begin()) {
     Serial.println("ERROR: INA219 not detected!");
@@ -419,6 +504,7 @@ void loop() {
 
   updateIndicators(data);
   checkSystemErrors(data);
+  updateOLED(data);
 
   unsigned long now = millis();
 
