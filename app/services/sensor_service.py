@@ -99,9 +99,9 @@ async def get_condition_distribution(db: AsyncSession, hours: int = 24, device_i
     color_map = {
         "Normal": "#10B981",
         "Low Light": "#3B82F6",
-        "Shadowing": "#F97316",
-        "Dust Accumulation": "#D97706",
-        "Fault": "#EF4444",
+        "Shadow": "#F97316",
+        "Panel Fault": "#EF4444",
+        "Over Heat": "#f43f5e",
     }
     return [
         {"name": r.condition, "value": round(r.cnt / total * 100), "color": color_map.get(r.condition, "#8899AA")}
