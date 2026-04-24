@@ -125,6 +125,17 @@ async def publish_alert(alert: Alert) -> bool:
     return True
 
 
+def _remove(path: str) -> None:
+    firebase_db.reference(path).delete()
+
+
+async def clear_device_alerts(device_id: str) -> bool:
+    if not initialize_firebase():
+        return False
+    await asyncio.to_thread(_remove, f"devices/{device_id}/alerts")
+    return True
+
+
 async def create_custom_token_for_user(user: User) -> tuple[str, str]:
     require_firebase()
 

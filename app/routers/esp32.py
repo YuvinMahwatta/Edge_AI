@@ -5,11 +5,20 @@ from app.database import get_db
 from app.schemas.sensor import SensorIngest
 from app.services.alert_service import create_alert_from_condition
 from app.services.firebase_service import append_telemetry, publish_alert, set_live_reading, update_device_state
-from app.services.ml_service import classify_condition
 from app.services.sensor_service import get_system_on, store_reading
 from app.utils.deps import verify_esp32_key
 
 router = APIRouter(prefix="/esp32", tags=["ESP32 Device"])
+
+
+@router.get("/state")
+async def get_device_state(
+    _key: str = Depends(verify_esp32_key),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lightweight polling endpoint for ESP32 when in Standby/Off mode."""
+    system_on = await get_system_on(db)
+    return {"system_on": system_on}
 
 
 @router.post("/ingest")
@@ -19,21 +28,21 @@ async def ingest_reading(
     db: AsyncSession = Depends(get_db),
 ):
     data = body.model_dump()
-
-    if body.condition == "Normal" and body.confidence == 0:
-        condition, confidence = classify_condition(
-            body.voltage,
-            body.current,
-            body.power,
-            body.temperature,
-            body.ldr1,
-            body.ldr2,
-        )
-        data["condition"] = condition
-        data["confidence"] = confidence
-
-    reading = await store_reading(db, data)
     system_on = await get_system_on(db)
+    print(f"\n>>> ESP32 INGEST: system_on = {system_on}\n", flush=True)
+
+    # ── System is OFF → reject data storage, just echo the command back ──
+    if not system_on:
+        print(">>> REJECTING INGEST – system is OFF", flush=True)
+        return {
+            "status": "rejected",
+            "reason": "system_off",
+            "device_id": data.get("device_id", "unknown"),
+            "system_on": False,
+        }
+
+    # ── System is ON → full pipeline ──
+    reading = await store_reading(db, data)
 
     live_payload = {
         "device_id": reading.device_id,
@@ -70,14 +79,12 @@ async def ingest_reading(
     except Exception:
         firebase_synced = False
 
-    alert = None
-    if data["condition"] != "Normal":
-        alert = await create_alert_from_condition(db, data["condition"], data["confidence"], device_id=reading.device_id)
-        if alert is not None:
-            try:
-                await publish_alert(alert)
-            except Exception:
-                pass
+    alert = await create_alert_from_condition(db, data["condition"], data["confidence"], device_id=reading.device_id)
+    if alert is not None:
+        try:
+            await publish_alert(alert)
+        except Exception:
+            pass
 
     return {
         "status": "ok",
@@ -87,4 +94,5 @@ async def ingest_reading(
         "confidence": data["confidence"],
         "firebase_synced": firebase_synced,
         "alert_id": alert.id if alert else None,
+        "system_on": system_on,
     }
