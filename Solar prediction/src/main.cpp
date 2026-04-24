@@ -16,7 +16,7 @@ const char* WIFI_SSID = "SLT_FIBRE";
 const char* WIFI_PASSWORD = "saman123";
 
 // Use your laptop/server LAN IP, not localhost.
-const char* BACKEND_BASE_URL = "http://192.168.1.21:8000";
+const char* BACKEND_BASE_URL = "http://192.168.1.18:8000";
 const char* ESP32_API_KEY = "sunsense-esp32-dev-secret-2026";
 const char* DEVICE_ID = "device-001";
 
@@ -149,8 +149,6 @@ void ensureWifiConnected() {
 SensorData readAllSensors() {
   SensorData d{};
 
-  d.panelVoltageV = readVoltageSensor();
-
   // Read digital LDR modules (LOW = light detected, HIGH = dark)
   d.ldr1Light = (digitalRead(LDR1_PIN) == LOW);
   d.ldr2Light = (digitalRead(LDR2_PIN) == LOW);
@@ -174,10 +172,13 @@ SensorData readAllSensors() {
     hasLastValidTemperature = true;
   }
 
+  // Read INA219 — use Bus+Shunt as true panel voltage (more accurate than analog sensor)
+  float shuntVoltage = ina219.getShuntVoltage_mV();
   float busVoltage = ina219.getBusVoltage_V();
   float currentmA  = ina219.getCurrent_mA();
 
   d.busVoltageV = busVoltage;
+  d.panelVoltageV = busVoltage + (shuntVoltage / 1000.0f);  // True panel voltage = Bus + Shunt drop
   d.currentA = fabs(currentmA / 1000.0f);   // abs value — works regardless of wiring direction
   d.powerW = d.panelVoltageV * d.currentA;
 
@@ -464,6 +465,8 @@ void setup() {
       delay(200);
     }
   }
+  Serial.println("INA219 detected! Calibration: 32V 2A (default)");
+  ina219.setCalibration_32V_2A();  // Explicitly set calibration
 
   // Initialize temperature sensor
   tempSensor.begin();
