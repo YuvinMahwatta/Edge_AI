@@ -3,8 +3,6 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_INA219.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <math.h>
@@ -16,7 +14,7 @@ const char* WIFI_SSID = "SLT_FIBRE";
 const char* WIFI_PASSWORD = "saman123";
 
 // Use your laptop/server LAN IP, not localhost.
-const char* BACKEND_BASE_URL = "http://192.168.1.21:8000";
+const char* BACKEND_BASE_URL = "http://192.168.1.18:8000";
 const char* ESP32_API_KEY = "sunsense-esp32-dev-secret-2026";
 const char* DEVICE_ID = "device-001";
 
@@ -24,10 +22,6 @@ const char* DEVICE_ID = "device-001";
 #define INA219_SDA_PIN        21
 #define INA219_SCL_PIN        22
 
-#define OLED_SDA_PIN          18
-#define OLED_SCL_PIN          19
-
-#define VOLTAGE_SENSOR_PIN    32
 #define LDR1_PIN              25    // Digital LDR module 1 (DO pin)
 #define LDR2_PIN              26    // Digital LDR module 2 (DO pin)
 #define TEMP_SENSOR_PIN        5
@@ -35,11 +29,6 @@ const char* DEVICE_ID = "device-001";
 #define GREEN_LED_PIN         16
 #define RED_LED_PIN            2
 #define BUZZER_PIN            15
-
-// ===================== ADC SETTINGS =====================
-const int ADC_MAX = 4095;
-const float ADC_REF = 3.3f;
-const float VOLTAGE_DIVIDER_RATIO = 5.0f;
 
 // ===================== THRESHOLDS (tuned for 6V 1W panel) =====================
 const float LOW_VOLTAGE_V        = 1.0f;    // panel barely producing
@@ -60,11 +49,6 @@ const unsigned long wifiRetryInterval = 10000;
 Adafruit_INA219 ina219;
 OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature tempSensor(&oneWire);
-
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-TwoWire I2COLED = TwoWire(1); // Use second I2C bus
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2COLED, -1);
 
 // ===================== STATE =====================
 bool monitoringEnabled = true;
@@ -91,22 +75,14 @@ struct SensorData {
 };
 
 // ===================== FUNCTION DECLARATIONS =====================
-float readVoltageSensor();
 SensorData readAllSensors();
 void updateIndicators(const SensorData& d);
 void checkSystemErrors(const SensorData& d);
 void print60SecondReport(const SensorData& d);
 void ensureWifiConnected();
+bool checkWakeState();
 bool postTelemetry(const SensorData& d);
 const char* mapModelLabelToBackendCondition(const char* mlClassName);
-void updateOLED(const SensorData& d);
-
-// ===================== READ VOLTAGE SENSOR =====================
-float readVoltageSensor() {
-  int raw = analogRead(VOLTAGE_SENSOR_PIN);
-  float pinVoltage = (raw * ADC_REF) / ADC_MAX;
-  return pinVoltage * VOLTAGE_DIVIDER_RATIO;
-}
 
 const char* mapModelLabelToBackendCondition(const char* mlClassName) {
   if (strcmp(mlClassName, "NORMAL") == 0) return "Normal";
@@ -149,8 +125,6 @@ void ensureWifiConnected() {
 SensorData readAllSensors() {
   SensorData d{};
 
-  d.panelVoltageV = readVoltageSensor();
-
   // Read digital LDR modules (LOW = light detected, HIGH = dark)
   d.ldr1Light = (digitalRead(LDR1_PIN) == LOW);
   d.ldr2Light = (digitalRead(LDR2_PIN) == LOW);
@@ -174,10 +148,13 @@ SensorData readAllSensors() {
     hasLastValidTemperature = true;
   }
 
+  // Read INA219 — use Bus+Shunt as true panel voltage (more accurate than analog sensor)
+  float shuntVoltage = ina219.getShuntVoltage_mV();
   float busVoltage = ina219.getBusVoltage_V();
   float currentmA  = ina219.getCurrent_mA();
 
   d.busVoltageV = busVoltage;
+  d.panelVoltageV = busVoltage + (shuntVoltage / 1000.0f);  // True panel voltage = Bus + Shunt drop
   d.currentA = fabs(currentmA / 1000.0f);   // abs value — works regardless of wiring direction
   d.powerW = d.panelVoltageV * d.currentA;
 
@@ -246,6 +223,37 @@ SensorData readAllSensors() {
   return d;
 }
 
+// ===================== NETWORK POLLING =====================
+bool checkWakeState() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  HTTPClient http;
+  String url = String(BACKEND_BASE_URL) + "/api/esp32/state";
+  http.begin(url);
+  http.addHeader("X-Api-Key", ESP32_API_KEY);
+
+  int httpCode = http.GET();
+  String response = http.getString();
+  http.end();
+
+  if (httpCode >= 200 && httpCode < 300 && response.length() > 0) {
+    StaticJsonDocument<256> respDoc;
+    DeserializationError error = deserializeJson(respDoc, response);
+    if (!error && respDoc.containsKey("system_on")) {
+      bool is_on = respDoc["system_on"].as<bool>();
+      monitoringEnabled = is_on;
+      
+      if (!is_on) {
+        Serial.println("System is OFF - Standby Mode (Polling for wake)");
+      } else {
+        Serial.println("System is ON - Resuming normal operation");
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 // ===================== NETWORK POST =====================
 bool postTelemetry(const SensorData& d) {
   if (WiFi.status() != WL_CONNECTED) return false;
@@ -288,6 +296,12 @@ bool postTelemetry(const SensorData& d) {
   Serial.printf("POST /api/esp32/ingest -> HTTP %d\n", httpCode);
   if (response.length() > 0) {
     Serial.println(response);
+    
+    StaticJsonDocument<256> respDoc;
+    DeserializationError error = deserializeJson(respDoc, response);
+    if (!error && respDoc.containsKey("system_on")) {
+      monitoringEnabled = respDoc["system_on"].as<bool>();
+    }
   }
 
   return httpCode >= 200 && httpCode < 300;
@@ -343,41 +357,6 @@ void updateIndicators(const SensorData& d) {
   }
 }
 
-// ===================== OLED DISPLAY =====================
-void updateOLED(const SensorData& d) {
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-
-  // Row 1: Voltage & Current
-  display.setCursor(0, 0);
-  display.printf("V:%.1fV  I:%.0fmA", d.panelVoltageV, d.currentA * 1000);
-
-  // Row 2: Power & Temperature
-  display.setCursor(0, 10);
-  display.printf("P:%.1fmW T:%.1fC", d.powerW * 1000, d.temperatureC);
-
-  // Row 3: LDR status
-  display.setCursor(0, 20);
-  display.printf("L1:%s L2:%s",
-    d.ldr1Light ? "ON" : "--",
-    d.ldr2Light ? "ON" : "--");
-
-  // Divider line
-  display.drawLine(0, 29, 127, 29, SSD1306_WHITE);
-
-  // Row 4: ML Prediction
-  display.setCursor(0, 35);
-  display.print("ML:");
-  display.print(d.backendCondition);
-
-  // Row 6: WiFi status
-  display.setCursor(0, 55);
-  display.printf("WiFi:%s", WiFi.status() == WL_CONNECTED ? "OK" : "NO");
-
-  display.display();
-}
-
 void checkSystemErrors(const SensorData& d) {
   Serial.println("================================");
   Serial.printf("Voltage : %.2f V | Current : %.3f A | Power : %.3f W\n",
@@ -430,30 +409,7 @@ void setup() {
   digitalWrite(RED_LED_PIN, LOW);
   noTone(BUZZER_PIN);
 
-  analogReadResolution(12);
-  
   Wire.begin(INA219_SDA_PIN, INA219_SCL_PIN);
-  I2COLED.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-
-  // Initialize OLED display
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("WARNING: SSD1306 OLED not found!");
-  } else {
-    Serial.println("OLED display detected!");
-    
-    // Set to maximum brightness
-    display.ssd1306_command(SSD1306_SETCONTRAST);
-    display.ssd1306_command(255);
-
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(10, 20);
-    display.println("SunSenseAI");
-    display.setCursor(10, 35);
-    display.println("Starting...");
-    display.display();
-  }
 
   if (!ina219.begin()) {
     Serial.println("ERROR: INA219 not detected!");
@@ -464,6 +420,8 @@ void setup() {
       delay(200);
     }
   }
+  Serial.println("INA219 detected! Calibration: 32V 2A (default)");
+  ina219.setCalibration_32V_2A();  // Explicitly set calibration
 
   // Initialize temperature sensor
   tempSensor.begin();
@@ -500,11 +458,26 @@ void setup() {
 void loop() {
   ensureWifiConnected();
 
+  if (!monitoringEnabled) {
+    // SYSTEM IS OFF — standby mode
+    digitalWrite(GREEN_LED_PIN, LOW);
+    digitalWrite(RED_LED_PIN, LOW);
+    noTone(BUZZER_PIN);
+
+    Serial.println("System OFF - Polling for wake...");
+
+    // Only ping the backend to see if we should turn back on
+    checkWakeState();
+    
+    // Sleep for 5 seconds before checking again (lowers power & network traffic)
+    delay(5000); 
+    return; // Skip reading sensors entirely
+  }
+
   SensorData data = readAllSensors();
 
   updateIndicators(data);
   checkSystemErrors(data);
-  updateOLED(data);
 
   unsigned long now = millis();
 
@@ -513,7 +486,7 @@ void loop() {
     print60SecondReport(data);
   }
 
-  if (monitoringEnabled && now - lastUploadTime >= uploadInterval) {
+  if (now - lastUploadTime >= uploadInterval) {
     lastUploadTime = now;
     bool ok = postTelemetry(data);
     Serial.println(ok ? "Telemetry upload: OK" : "Telemetry upload: FAILED");
