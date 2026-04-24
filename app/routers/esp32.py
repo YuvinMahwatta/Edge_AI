@@ -5,7 +5,6 @@ from app.database import get_db
 from app.schemas.sensor import SensorIngest
 from app.services.alert_service import create_alert_from_condition
 from app.services.firebase_service import append_telemetry, publish_alert, set_live_reading, update_device_state
-from app.services.ml_service import classify_condition
 from app.services.sensor_service import get_system_on, store_reading
 from app.utils.deps import verify_esp32_key
 
@@ -18,19 +17,8 @@ async def ingest_reading(
     _key: str = Depends(verify_esp32_key),
     db: AsyncSession = Depends(get_db),
 ):
+    # Trust the ESP32's onboard ML model for condition & confidence
     data = body.model_dump()
-
-    if body.condition == "Normal" and body.confidence == 0:
-        condition, confidence = classify_condition(
-            body.voltage,
-            body.current,
-            body.power,
-            body.temperature,
-            body.ldr1,
-            body.ldr2,
-        )
-        data["condition"] = condition
-        data["confidence"] = confidence
 
     reading = await store_reading(db, data)
     system_on = await get_system_on(db)
@@ -70,14 +58,12 @@ async def ingest_reading(
     except Exception:
         firebase_synced = False
 
-    alert = None
-    if data["condition"] != "Normal":
-        alert = await create_alert_from_condition(db, data["condition"], data["confidence"], device_id=reading.device_id)
-        if alert is not None:
-            try:
-                await publish_alert(alert)
-            except Exception:
-                pass
+    alert = await create_alert_from_condition(db, data["condition"], data["confidence"], device_id=reading.device_id)
+    if alert is not None:
+        try:
+            await publish_alert(alert)
+        except Exception:
+            pass
 
     return {
         "status": "ok",
@@ -87,4 +73,5 @@ async def ingest_reading(
         "confidence": data["confidence"],
         "firebase_synced": firebase_synced,
         "alert_id": alert.id if alert else None,
+        "system_on": system_on,
     }
