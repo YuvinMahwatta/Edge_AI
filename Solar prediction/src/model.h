@@ -7,27 +7,27 @@
 inline int predict_model(const float features[10]) {
 
     if (features[3] <= 0.25000000f) {
-        if (features[0] <= 59.92000008f) {
+        if (features[0] <= 45.00000000f) {
             return 1;
         } else {
             return 3;
         }
     } else {
         if (features[3] <= 0.75000000f) {
-            if (features[0] <= 60.04999924f) {
+            if (features[0] <= 45.00000000f) {
                 return 2;
             } else {
                 return 3;
             }
         } else {
-            if (features[0] <= 59.37500000f) {
+            if (features[0] <= 45.00000000f) {
 
                 if (features[5] <= 3.62045443f) {
 
                     if (features[7] <= 0.36308044f) {
                         return 4;
                     } else {
-                        if (features[0] <= 53.32499886f) {
+                        if (features[0] <= 40.00000000f) {
                             return 4;
                         } else {
                             return 3;
@@ -49,21 +49,18 @@ inline int predict_model(const float features[10]) {
 
             } else {
 
-                if (features[9] <= 0.01137562f) {
-                    if (features[9] <= 0.00832190f) {
-                        return 4;
+                // temp > 45°C — Overheat zone
+                if (features[9] <= 0.02000000f) {     // power_efficiency low (panel struggling)
+                    if (features[9] <= 0.01200000f) {  // very low efficiency
+                        return 4;                      // PANEL_FAULT (overheating + no output)
                     } else {
-                        return 3;
+                        return 3;                      // OVERHEAT (hot but still some output)
                     }
                 } else {
-                    if (features[0] <= 60.00499916f) {
-                        if (features[7] <= 0.20880000f) {
-                            return 4;
-                        } else {
-                            return 3;
-                        }
+                    if (features[7] <= 0.15000000f) {  // power_w very low despite good efficiency
+                        return 4;                      // PANEL_FAULT
                     } else {
-                        return 3;
+                        return 3;                      // OVERHEAT (hot but producing power)
                     }
                 }
             }
