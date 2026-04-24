@@ -52,6 +52,8 @@ async def create_alert_from_condition(
     confidence: float,
     device_id: str | None = None,
 ) -> Alert | None:
+    print(f"\n[ALERT_DEBUG] Received Condition: '{condition}' (Type: {type(condition)})", flush=True)
+    
     mapping = {
         "Normal": (
             "success",
@@ -76,6 +78,12 @@ async def create_alert_from_condition(
             "high",
             "Partial Shadowing Detected",
             "Significant light difference detected between LDR zones. Check for debris or new obstacles.",
+        ),
+        "Overheat": (
+            "warning",
+            "medium",
+            "High Temperature Warning",
+            "System temperature has exceeded safe thresholds. Throttling or cooling may be required.",
         ),
         "Over Heat": (
             "warning",
@@ -105,13 +113,17 @@ async def create_alert_from_condition(
 
     info = mapping.get(condition)
     if info is None:
+        print(f"[ALERT_DEBUG] No mapping found for condition: '{condition}'", flush=True)
         return None
 
     alert_type, severity, title, desc = info
+    
+    # --- ALWAYS create a new alert for every ingest to ensure live stacking ---
+    print(f"[ALERT_DEBUG] SUCCESS: Creating NEW alert: '{title}'", flush=True)
     return await create_alert(
         db,
         title,
-        f"{desc} (Confidence: {confidence:.1f}%)",
+        desc,
         alert_type,
         severity,
         device_id=device_id,
@@ -168,9 +180,17 @@ async def clear_all_alerts(db: AsyncSession, device_id: str | None = None) -> in
     )
     count = count_result.scalar() or 0
 
-    # Bulk delete in a single SQL statement
+    # Bulk delete in DB
     await db.execute(
         delete(Alert).where(Alert.device_id == target_device_id)
     )
     await db.commit()
+
+    # Clear from Firebase Real-time
+    try:
+        from app.services.firebase_service import clear_device_alerts
+        await clear_device_alerts(target_device_id)
+    except Exception as e:
+        print(f"[FIREBASE_ERROR] Failed to clear alerts: {e}", flush=True)
+
     return count

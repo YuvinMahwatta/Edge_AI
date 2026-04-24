@@ -42,6 +42,7 @@ class DerivedFeatures(BaseModel):
 
 class SensorHistoryPoint(BaseModel):
     time: str
+    iso_time: str | None = None
     value: float
 
 

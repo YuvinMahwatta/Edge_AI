@@ -101,7 +101,11 @@ async def get_sensor_history(
 
     def to_points(attr: str) -> list[SensorHistoryPoint]:
         return [
-            SensorHistoryPoint(time=r.recorded_at.strftime("%H:%M"), value=round(getattr(r, attr), 2))
+            SensorHistoryPoint(
+                time=r.recorded_at.strftime("%H:%M"),
+                iso_time=r.recorded_at.isoformat(),
+                value=round(getattr(r, attr), 4)
+            )
             for r in readings
         ]
 
@@ -110,8 +114,8 @@ async def get_sensor_history(
         current=to_points("current"),
         power=to_points("power"),
         temperature=to_points("temperature"),
-        ldr1=[SensorHistoryPoint(time=r.recorded_at.strftime("%H:%M"), value=r.ldr1) for r in readings],
-        ldr2=[SensorHistoryPoint(time=r.recorded_at.strftime("%H:%M"), value=r.ldr2) for r in readings],
+        ldr1=[SensorHistoryPoint(time=r.recorded_at.strftime("%H:%M"), iso_time=r.recorded_at.isoformat(), value=r.ldr1) for r in readings],
+        ldr2=[SensorHistoryPoint(time=r.recorded_at.strftime("%H:%M"), iso_time=r.recorded_at.isoformat(), value=r.ldr2) for r in readings],
     )
 
 

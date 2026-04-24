@@ -11,17 +11,38 @@ from app.utils.deps import verify_esp32_key
 router = APIRouter(prefix="/esp32", tags=["ESP32 Device"])
 
 
+@router.get("/state")
+async def get_device_state(
+    _key: str = Depends(verify_esp32_key),
+    db: AsyncSession = Depends(get_db)
+):
+    """Lightweight polling endpoint for ESP32 when in Standby/Off mode."""
+    system_on = await get_system_on(db)
+    return {"system_on": system_on}
+
+
 @router.post("/ingest")
 async def ingest_reading(
     body: SensorIngest,
     _key: str = Depends(verify_esp32_key),
     db: AsyncSession = Depends(get_db),
 ):
-    # Trust the ESP32's onboard ML model for condition & confidence
     data = body.model_dump()
-
-    reading = await store_reading(db, data)
     system_on = await get_system_on(db)
+    print(f"\n>>> ESP32 INGEST: system_on = {system_on}\n", flush=True)
+
+    # ── System is OFF → reject data storage, just echo the command back ──
+    if not system_on:
+        print(">>> REJECTING INGEST – system is OFF", flush=True)
+        return {
+            "status": "rejected",
+            "reason": "system_off",
+            "device_id": data.get("device_id", "unknown"),
+            "system_on": False,
+        }
+
+    # ── System is ON → full pipeline ──
+    reading = await store_reading(db, data)
 
     live_payload = {
         "device_id": reading.device_id,

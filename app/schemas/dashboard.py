@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 class ConditionSlice(BaseModel):
     name: str
-    value: int
+    value: float
     color: str
 
 

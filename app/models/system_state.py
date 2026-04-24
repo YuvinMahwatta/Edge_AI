@@ -31,7 +31,7 @@ class UserPreference(Base):
     # Display preferences
     temp_unit: Mapped[str] = mapped_column(String(20), default="celsius")       # celsius | fahrenheit
     energy_unit: Mapped[str] = mapped_column(String(20), default="kw")          # kw | wh
-    refresh_rate: Mapped[int] = mapped_column(default=5)                        # seconds
+    refresh_rate: Mapped[int] = mapped_column(default=10)                        # seconds
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
