@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -52,15 +52,24 @@ async def create_alert_from_condition(
     confidence: float,
     device_id: str | None = None,
 ) -> Alert | None:
-    if condition == "Normal":
-        return None
-
     mapping = {
+        "Normal": (
+            "success",
+            "low",
+            "System Operating Normally",
+            "All parameters are within typical ranges and no faults were detected.",
+        ),
         "Low Light": (
             "info",
             "low",
             "Low Light Condition",
             "Light intensity below threshold. Reduced output is expected during cloudy periods.",
+        ),
+        "Shadow": (
+            "danger",
+            "high",
+            "Panel Shadowing Detected",
+            "Significant light difference detected between LDR zones. Check for debris or new obstacles.",
         ),
         "Shadowing": (
             "danger",
@@ -68,11 +77,23 @@ async def create_alert_from_condition(
             "Partial Shadowing Detected",
             "Significant light difference detected between LDR zones. Check for debris or new obstacles.",
         ),
+        "Over Heat": (
+            "warning",
+            "medium",
+            "High Temperature Warning",
+            "System temperature has exceeded safe thresholds. Throttling or cooling may be required.",
+        ),
         "Dust Accumulation": (
             "warning",
             "medium",
             "Dust Accumulation Detected",
             "Efficiency has dropped. Cleaning recommended to restore optimal output.",
+        ),
+        "Panel Fault": (
+            "danger",
+            "critical",
+            "Panel Hardware Fault",
+            "Sensor readings indicate a possible hardware fault in the solar array.",
         ),
         "Fault": (
             "danger",
@@ -135,3 +156,21 @@ async def resolve_alert(db: AsyncSession, alert_id: str) -> Alert | None:
     alert.resolved_at = datetime.now(timezone.utc)
     await db.flush()
     return alert
+
+
+async def clear_all_alerts(db: AsyncSession, device_id: str | None = None) -> int:
+    settings = get_settings()
+    target_device_id = device_id or settings.DEFAULT_DEVICE_ID
+
+    # Count first
+    count_result = await db.execute(
+        select(func.count()).select_from(Alert).where(Alert.device_id == target_device_id)
+    )
+    count = count_result.scalar() or 0
+
+    # Bulk delete in a single SQL statement
+    await db.execute(
+        delete(Alert).where(Alert.device_id == target_device_id)
+    )
+    await db.commit()
+    return count
