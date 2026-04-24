@@ -1,6 +1,6 @@
 export const T = {
-  bg: "#FFFFFF",
-  surface: "#F9FAFB",
+  bg: "#eef9f1",
+  surface: "#eef9f1",
   card: "#FFFFFF",
   cardHover: "#F3F4F6",
   border: "#E5E7EB",

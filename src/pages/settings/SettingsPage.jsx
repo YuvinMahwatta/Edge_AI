@@ -5,13 +5,13 @@ import { api } from "../../api";
 import Toggle from "../../components/common/Toggle";
 import Badge from "../../components/common/Badge";
 
-const SettingsPage = () => {
+const SettingsPage = ({ prefs, onPrefsChange }) => {
   const [emailNotif, setEmailNotif] = useState(true);
   const [realtimeAlerts, setRealtimeAlerts] = useState(true);
   const [weeklySummary, setWeeklySummary] = useState(false);
   const [tempUnit, setTempUnit] = useState("celsius");
   const [energyUnit, setEnergyUnit] = useState("kw");
-  const [refreshRate, setRefreshRate] = useState("5");
+  const [refreshRate, setRefreshRate] = useState("10");
   const [device, setDevice] = useState({ edge_device: "ESP-WROOM-32 (NodeMCU)", firmware: "v2.1.4-tflite", ml_model: "TFLite Fault Classifier v3", wifi_status: "Connected", uptime: "N/A" });
   const [sensors, setSensors] = useState([
     { name: "INA219 (V/I/P)", status: "Calibrated", ok: true },
@@ -38,6 +38,7 @@ const SettingsPage = () => {
 
   const savePref = (key, value) => {
     api.updatePrefs({ [key]: value }).catch(() => {});
+    if (onPrefsChange) onPrefsChange((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleEmailNotif = (v) => { setEmailNotif(v); savePref("email_notifications", v); };
@@ -54,7 +55,7 @@ const SettingsPage = () => {
         <p style={{ fontSize: 13.5, color: T.textMuted, marginTop: 4 }}>Configure your SunSense AI system preferences.</p>
       </div>
 
-      <div className="grid-2-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20 }}>
+      <div className="settings-cards-2x2" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 20 }}>
         {/* Notification Preferences */}
         <div className="fade-in" style={{ background: T.card, borderRadius: 16, padding: 28, border: `1px solid ${T.border}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
@@ -111,7 +112,7 @@ const SettingsPage = () => {
             <div>
               <label style={{ display: "block", fontSize: 13, color: T.text, marginBottom: 8 }}>Energy Unit</label>
               <div style={{ display: "flex", gap: 8 }}>
-                {[["kw", "kW (Kilowatts)"], ["wh", "Wh (Watt-hours)"]].map(([v, l]) => (
+                {[["kw", "W (Watts)"], ["wh", "mW (Milliwatts)"]].map(([v, l]) => (
                   <button key={v} onClick={() => handleEnergyUnit(v)} style={{
                     flex: 1, padding: "10px 16px", borderRadius: 8, border: `1px solid ${energyUnit === v ? T.accent : T.border}`,
                     background: energyUnit === v ? T.accentGlow : "transparent", color: energyUnit === v ? T.accent : T.textMuted,
@@ -125,7 +126,7 @@ const SettingsPage = () => {
             <div>
               <label style={{ display: "block", fontSize: 13, color: T.text, marginBottom: 8 }}>Data Refresh Rate</label>
               <div style={{ display: "flex", gap: 8 }}>
-                {[["2", "2s"], ["5", "5s"], ["10", "10s"], ["30", "30s"]].map(([v, l]) => (
+                {[["10", "10s"], ["30", "30s"], ["60", "60s"], ["300", "300s"]].map(([v, l]) => (
                   <button key={v} onClick={() => handleRefreshRate(v)} style={{
                     flex: 1, padding: "10px", borderRadius: 8, border: `1px solid ${refreshRate === v ? T.accent : T.border}`,
                     background: refreshRate === v ? T.accentGlow : "transparent", color: refreshRate === v ? T.accent : T.textMuted,

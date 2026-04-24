@@ -76,6 +76,9 @@ export const api = {
 
   resolve: (id) => request(`/alerts/${id}/resolve`, { method: "PATCH" }),
 
+  clearAlerts: (deviceId = DEFAULT_DEVICE_ID) =>
+    request(withDevice("/alerts/clear", deviceId), { method: "DELETE" }),
+
   settings: () => request("/settings"),
 
   updatePrefs: (data) =>

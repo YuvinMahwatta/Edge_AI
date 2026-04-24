@@ -45,9 +45,19 @@ const css = `
     .login-left { display: none; }
     .sidebar { position: fixed; left: -240px; top: 0; bottom: 0; z-index: 50; }
     .sidebar.open { left: 0; }
-    .mobile-header { display: flex !important; justify-content: space-between; align-items: center; padding: 0 20px; height: 60px; background: #fff; border-bottom: 1px solid #E5E7EB; position: sticky; top: 0; z-index: 40; }
+    .mobile-header { display: flex !important; justify-content: space-between; align-items: center; padding: 0 20px; height: 60px; background: #eef9f1; border-bottom: 1px solid #E5E7EB; position: sticky; top: 0; z-index: 40; }
     .main-content { padding: 20px !important; }
     .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 45; backdrop-filter: blur(2px); }
+  }
+  @media (max-width: 768px) {
+    .charts-2x2 { grid-template-columns: 1fr !important; }
+    .monitor-cards-3x2 { grid-template-columns: 1fr !important; }
+    .derived-cards-4 { grid-template-columns: 1fr !important; }
+    .settings-cards-2x2 { grid-template-columns: 1fr !important; }
+  }
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .monitor-cards-3x2 { grid-template-columns: repeat(2, 1fr) !important; }
+    .derived-cards-4 { grid-template-columns: repeat(2, 1fr) !important; }
   }
 `;
 
@@ -67,6 +77,7 @@ export default function SunSenseAI() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [realtimeEnabled, setRealtimeEnabled] = useState(false);
   const [activeAlertCount, setActiveAlertCount] = useState(0);
+  const [prefs, setPrefs] = useState({ temp_unit: "celsius", energy_unit: "kw", refresh_rate: 10 });
 
   const deviceId = useMemo(() => api.defaultDeviceId, []);
 
@@ -93,9 +104,16 @@ export default function SunSenseAI() {
       .then(() => {
         try {
           const payload = JSON.parse(atob(token.split(".")[1]));
-          setRole(payload.role || "user");
+          const currentRole = payload.role || "user";
+          setRole(currentRole);
+          setActivePage(currentRole === "admin" ? "users" : "dashboard");
+          
+          api.settings().then(data => {
+            if (data?.preferences) setPrefs(data.preferences);
+          }).catch(()=>{});
         } catch {
           setRole("user");
+          setActivePage("dashboard");
         }
         setPage("app");
       })
@@ -154,7 +172,7 @@ export default function SunSenseAI() {
       };
 
       await poll();
-      intervalId = setInterval(poll, 5000);
+      intervalId = setInterval(poll, prefs.refresh_rate * 1000);
     };
 
     start();
@@ -165,16 +183,19 @@ export default function SunSenseAI() {
       unsubscribeAlerts();
       if (intervalId) clearInterval(intervalId);
     };
-  }, [page, deviceId]);
+  }, [page, deviceId, prefs.refresh_rate]);
 
   const handleLogin = async (tokenData) => {
     setToken(tokenData.access_token);
     setRole(tokenData.role);
     setUserName(tokenData.name);
+    setActivePage(tokenData.role === "admin" ? "users" : "dashboard");
     setPage("app");
 
     try {
       await fetchBackendLive(deviceId, setLiveData, setSystemOn);
+      const data = await api.settings();
+      if (data?.preferences) setPrefs(data.preferences);
     } catch {
       // handled by app effect fallback
     }
@@ -210,19 +231,25 @@ export default function SunSenseAI() {
     </>
   );
 
-  const navItems = [
-    { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { id: "monitor", icon: Activity, label: "Monitor" },
-    { id: "alerts", icon: Bell, label: "Alerts", badge: activeAlertCount > 0 ? String(activeAlertCount) : "" },
-    { id: "settings", icon: Settings, label: "Settings" },
-  ];
-  if (role === "admin") navItems.push({ id: "users", icon: Users, label: "User Management" });
+  let navItems = [];
+  if (role === "admin") {
+    navItems = [
+      { id: "users", icon: Users, label: "User Management" },
+    ];
+  } else {
+    navItems = [
+      { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+      { id: "monitor", icon: Activity, label: "Monitor" },
+      { id: "alerts", icon: Bell, label: "Alerts", badge: activeAlertCount > 0 ? String(activeAlertCount) : "" },
+      { id: "settings", icon: Settings, label: "Settings" },
+    ];
+  }
 
   const pageContent = {
-    dashboard: <DashboardPage deviceId={deviceId} liveData={liveData} systemOn={systemOn} realtimeEnabled={realtimeEnabled} />,
-    monitor: <MonitorPage deviceId={deviceId} liveData={liveData} systemOn={systemOn} setSystemOn={setSystemOn} />,
+    dashboard: <DashboardPage deviceId={deviceId} liveData={liveData} systemOn={systemOn} setSystemOn={setSystemOn} realtimeEnabled={realtimeEnabled} prefs={prefs} />,
+    monitor: <MonitorPage deviceId={deviceId} liveData={liveData} systemOn={systemOn} setSystemOn={setSystemOn} prefs={prefs} />,
     alerts: <AlertsPage deviceId={deviceId} realtimeEnabled={realtimeEnabled} />,
-    settings: <SettingsPage />,
+    settings: <SettingsPage prefs={prefs} onPrefsChange={setPrefs} />,
     users: <UserManagementPage />,
   };
 
