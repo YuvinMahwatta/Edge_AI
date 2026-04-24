@@ -3,13 +3,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sunsense"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:11221@localhost:5432/sunsense"
 
     # JWT
-    SECRET_KEY: str = "change-me-to-a-random-64-char-string"
+    SECRET_KEY: str = "6f4f4f1f9e4f7c4d2b6d8a3e9f1c7b4a5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
 
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
     # ESP32
-    ESP32_API_KEY: str = "change-me-device-secret"
+    ESP32_API_KEY: str = "sunsense-esp32-dev-secret-2026"
     DEFAULT_DEVICE_ID: str = "device-001"
 
     # Firebase Realtime Database
