@@ -22,9 +22,9 @@ export const dailyPower = Array.from({ length: 7 }, (_, i) => ({
 export const conditionDist = [
   { name: "Normal", value: 62, color: T.green },
   { name: "Low Light", value: 18, color: T.blue },
-  { name: "Shadowing", value: 10, color: T.orange },
-  { name: "Dust", value: 7, color: T.accentDark },
-  { name: "Fault", value: 3, color: T.red },
+  { name: "Shadow", value: 10, color: T.orange },
+  { name: "Panel Fault", value: 3, color: T.red },
+  { name: "Over Heat", value: 2, color: "#f43f5e" },
 ];
 
 export const alertsData = [

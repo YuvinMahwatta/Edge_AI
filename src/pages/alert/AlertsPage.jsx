@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { T } from "../../constants/theme";
 import { api } from "../../api";
 import { subscribeToDeviceAlerts } from "../../realtime";
 import { alertsData as mockAlerts } from "../../utils/mockData";
 import Badge from "../../components/common/Badge";
+import Btn from "../../components/common/Btn";
 import AlertItem from "../../components/common/AlertItem";
 
 const AlertsPage = ({ deviceId, realtimeEnabled }) => {
-  const [alerts, setAlerts] = useState(mockAlerts);
+  const [alerts, setAlerts] = useState([]);
 
   const fetchAlerts = async () => {
     try {
       const data = await api.alerts(deviceId);
       const all = [...data.active, ...data.resolved];
-      if (all.length > 0) setAlerts(all);
+      setAlerts(all);
     } catch {
       // keep mock data on failure
     }
@@ -45,6 +47,16 @@ const AlertsPage = ({ deviceId, realtimeEnabled }) => {
     }
   };
 
+  const clearAll = async () => {
+    if (!window.confirm(`Are you sure you want to clear all ${alerts.length} alerts? This cannot be undone.`)) return;
+    try {
+      await api.clearAlerts(deviceId);
+      setAlerts([]);
+    } catch (err) {
+      console.error("Failed to clear alerts:", err.message);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28, flexWrap: "wrap", gap: 12 }}>
@@ -52,7 +64,15 @@ const AlertsPage = ({ deviceId, realtimeEnabled }) => {
           <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: -0.5 }}>System Alerts</h1>
           <p style={{ fontSize: 13.5, color: T.textMuted, marginTop: 4 }}>Important notifications about your solar system&apos;s performance.</p>
         </div>
-        <Badge color={T.orange} bg={T.orangeBg}>{active.length} active alerts</Badge>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <Badge color={T.orange} bg={T.orangeBg}>{active.length} active alerts</Badge>
+          {alerts.length > 0 && (
+            <Btn variant="danger" size="sm" onClick={clearAll} style={{ gap: 6 }}>
+              <Trash2 size={14} />
+              Clear All ({alerts.length})
+            </Btn>
+          )}
+        </div>
       </div>
 
       {active.length > 0 && (
